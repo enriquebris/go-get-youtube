@@ -70,7 +70,7 @@ type Option struct {
 }
 
 // Response Data
-type playerResponse struct {
+type PlayerResponse struct {
 	ResponseContext struct {
 		ServiceTrackingParams []struct {
 			Service string `json:"service"`
@@ -399,6 +399,27 @@ func Get(video_id string) (Video, error) {
 	return *meta, nil
 }
 
+// given a video id, get it's information from youtube
+func GetMetadata(video_id string) (PlayerResponse, error) {
+	if strings.Contains(video_id, "youtube.com/watch?") {
+		video_id, _ = extractId(video_id)
+	}
+
+	// fetch video meta from youtube
+	query_string, err := fetchMeta(video_id)
+
+	if err != nil {
+		return PlayerResponse{}, err
+	}
+
+	player_response, _, err := getPlayerResponse(query_string)
+	if err != nil {
+		return PlayerResponse{}, err
+	}
+
+	return player_response, nil
+}
+
 func (video *Video) Download(index int, filename string, option *Option) error {
 	var (
 		out    *os.File
@@ -615,8 +636,7 @@ func fetchMeta(video_id string) (string, error) {
 	return string(query_string), nil
 }
 
-// parse youtube video metadata and return a Video object
-func parseMeta(video_id, query_string string) (*Video, error) {
+func getPlayerResponse(query_string string) (PlayerResponse, url.Values, error) {
 	// parse the query string
 	u, _ := url.Parse("?" + query_string)
 
@@ -625,11 +645,21 @@ func parseMeta(video_id, query_string string) (*Video, error) {
 
 	// no such video
 	if query.Get("errorcode") != "" || query.Get("status") == "fail" {
-		return nil, errors.New(query.Get("reason"))
+		return PlayerResponse{}, url.Values{}, errors.New(query.Get("reason"))
 	}
 
-	var player_response playerResponse
+	var player_response PlayerResponse
 	json.Unmarshal([]byte(query.Get("player_response")), &player_response)
+
+	return player_response, query, nil
+}
+
+// parse youtube video metadata and return a Video object
+func parseMeta(video_id, query_string string) (*Video, error) {
+	player_response, query, err := getPlayerResponse(query_string)
+	if err != nil {
+		return nil, err
+	}
 
 	// collate the necessary params
 	video := &Video{
